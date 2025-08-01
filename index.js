@@ -183,3 +183,54 @@ app.delete("/clients/:id", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on http://localhost:${PORT}`);
 });
+
+const Commande = require("./models/commande");
+
+//Commande
+app.post("/commandes", async (req, res) => {
+  try {
+    const commande = new Commande(req.body);
+    await commande.save();
+    res.status(201).json(commande);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Get all commandes (for admin panel)
+app.get("/commandes", async (req, res) => {
+  try {
+    const commandes = await Commande.find().sort({ createdAt: -1 });
+    res.json(commandes);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update commande status (for admin panel)
+app.patch("commandes/:id/status", async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (
+      !["En cours de traitement", "Accepted", "Refused", "Livré"].includes(
+        status
+      )
+    ) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+
+    const commande = await Commande.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true }
+    );
+
+    if (!commande) {
+      return res.status(404).json({ error: "Commande not found" });
+    }
+
+    res.json(commande);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
