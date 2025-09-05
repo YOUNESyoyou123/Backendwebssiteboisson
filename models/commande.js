@@ -1,4 +1,4 @@
-// models/Commande.js
+
 const mongoose = require("mongoose");
 
 const CommandeSchema = new mongoose.Schema({
@@ -10,6 +10,7 @@ const CommandeSchema = new mongoose.Schema({
   wilaya: { type: String },
   commune: { type: String },
   address: { type: String },
+  responsable: { type: String, default: "--" },
   products: [
     {
       name: { type: String, required: true },

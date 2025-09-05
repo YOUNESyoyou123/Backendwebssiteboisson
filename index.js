@@ -4,11 +4,13 @@ const connectDB = require("./configurationBD/configurationbd");
 const Products = require("./models/product");
 const Slider = require("./models/slider");
 const Inscriptionclient = require("./models/inscription");
-
+const jwt = require("jsonwebtoken");
+JWT_SECRET = "younes";
 const app = express();
 const PORT = 5000;
+const Categorie = require("./models/categorie");
+const Diposercv = require("./models/diposercv");
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
@@ -22,6 +24,20 @@ app.get("/products", async (req, res) => {
   try {
     const data = await Products.find();
     res.status(200).json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/products/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const product = await Products.findById(id);
+    if (!product) {
+      return res.status(404).json({ error: "Produit non trouvé" });
+    }
+    res.status(200).json(product);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -70,8 +86,14 @@ app.get("/sliders", async (req, res) => {
 app.post("/sliders", async (req, res) => {
   try {
     // Validation des champs requis
-    if (!req.body.title || !req.body.product || !req.body.ProductSliderImage) {
-      return res.status(400).json({ error: "Champs requis manquants" });
+    if (
+      !req.body.fr?.title ||
+      !req.body.product ||
+      !req.body.ProductSliderImage
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Champs requis manquants (titre FR, produit, image)" });
     }
 
     const product = await Products.findById(req.body.product);
@@ -80,15 +102,41 @@ app.post("/sliders", async (req, res) => {
     }
 
     const newSlider = await Slider.create({
-      title: req.body.title,
-      DescriptionSlider: req.body.DescriptionSlider || "", // Description optionnelle
+      // Champs communs (non spécifiques à la langue)
       ProductSliderImage: req.body.ProductSliderImage,
       product: req.body.product,
-      // Copie des champs du produit
-      ProductName: product.ProductName,
-      Description: product.Description,
-      ProductImage: product.ProductImage,
-      category: product.category,
+
+      // Champs spécifiques à chaque langue
+      ar: {
+        title: req.body.ar?.title || req.body.fr.title, // Utilise le titre FR si titre AR non fourni
+        DescriptionSlider:
+          req.body.ar?.DescriptionSlider ||
+          req.body.fr?.DescriptionSlider ||
+          "",
+        ProductName: product.ar.ProductName,
+        Description: product.ar.Description,
+        category: product.ar.category,
+        Gout: product.ar.Gout || "",
+      },
+      fr: {
+        title: req.body.fr.title,
+        DescriptionSlider: req.body.fr.DescriptionSlider || "",
+        ProductName: product.fr.ProductName,
+        Description: product.fr.Description,
+        category: product.fr.category,
+        Gout: product.fr.Gout || "",
+      },
+      en: {
+        title: req.body.en?.title || req.body.fr.title, // Utilise le titre FR si titre EN non fourni
+        DescriptionSlider:
+          req.body.en?.DescriptionSlider ||
+          req.body.fr?.DescriptionSlider ||
+          "",
+        ProductName: product.en.ProductName,
+        Description: product.en.Description,
+        category: product.en.category,
+        Gout: product.en.Gout || "",
+      },
     });
 
     res.status(201).json(newSlider);
@@ -179,7 +227,47 @@ app.delete("/clients/:id", async (req, res) => {
   }
 });
 
-// Start Server
+app.post("/login", async (req, res) => {
+  try {
+    const { FullName, Password } = req.body;
+
+    // Vérification des champs requis
+    if (!FullName || !Password) {
+      return res
+        .status(400)
+        .json({ error: "FullName et password sont requis." });
+    }
+
+    // Recherche de l'utilisateur
+    const user = await Inscriptionclient.findOne({ FullName });
+    if (!user) {
+      return res.status(401).json({ error: "Nom ou mot de passe incorrect." });
+    }
+
+    // Comparaison directe du mot de passe
+    if (Password !== user.Password) {
+      return res.status(401).json({ error: "Nom ou mot de passe incorrect." });
+    }
+
+    // Génération du token JWT
+    const token = jwt.sign(
+      { id: user._id, name: user.FullName, role: user.Role },
+      JWT_SECRET,
+      { expiresIn: "4h" }
+    );
+
+    // Réponse avec le token
+    return res.status(200).json({
+      token,
+      FullName: user.FullName,
+      Role: user.Role,
+    });
+  } catch (error) {
+    console.error("Erreur serveur :", error);
+    return res.status(500).json({ error: "Erreur serveur." });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on http://localhost:${PORT}`);
 });
@@ -208,29 +296,236 @@ app.get("/commandes", async (req, res) => {
 });
 
 // Update commande status (for admin panel)
-app.patch("commandes/:id/status", async (req, res) => {
+// app.patch("commandes/:id/status", async (req, res) => {
+//   try {
+//     const { status } = req.body;
+//     if (
+//       !["En cours de traitement", "Accepted", "Refused", "Livré"].includes(
+//         status
+//       )
+//     ) {
+//       return res.status(400).json({ error: "Invalid status" });
+//     }
+
+//     const commande = await Commande.findByIdAndUpdate(
+//       req.params.id,
+//       { status },
+//       { new: true }
+//     );
+
+//     if (!commande) {
+//       return res.status(404).json({ error: "Commande not found" });
+//     }
+
+//     res.json(commande);
+//   } catch (err) {
+//     res.status(400).json({ error: err.message });
+//   }
+// });
+
+app.patch("/commandes/:id/status", async (req, res) => {
+  const { id } = req.params;
+  const { status, responsable } = req.body;
+
   try {
-    const { status } = req.body;
-    if (
-      !["En cours de traitement", "Accepted", "Refused", "Livré"].includes(
-        status
-      )
-    ) {
-      return res.status(400).json({ error: "Invalid status" });
+    const updated = await Commande.findByIdAndUpdate(
+      id,
+      { status, responsable },
+      { new: true }
+    );
+    res.status(200).json(updated);
+  } catch (error) {
+    res.status(500).json({ error: "Update failed" });
+  }
+});
+
+//inscription
+
+//Categorie
+
+app.post("/categories", async (req, res) => {
+  try {
+    const { CategorieName, LogoCategorie } = req.body;
+
+    const existingCategorie = await Categorie.findOne({ CategorieName });
+    if (existingCategorie) {
+      return res.status(400).json({ message: "Cette categorie existe déjà" });
     }
 
-    const commande = await Commande.findByIdAndUpdate(
+    const newCategorie = new Categorie({
+      CategorieName,
+      LogoCategorie,
+    });
+
+    const savedCategorie = await newCategorie.save();
+    res.status(201).json(savedCategorie);
+  } catch (error) {
+    console.error(error);
+    res
+      .status(500)
+      .json({ message: "Erreur lors de la création de la categorie" });
+  }
+});
+
+// Récupérer toutes les categories (READ)
+app.get("/categories", async (req, res) => {
+  try {
+    const categories = await Categorie.find();
+    res.json(categories);
+  } catch (error) {
+    console.error(error);
+    res
+      .status(500)
+      .json({ message: "Erreur lors de la récupération des categories" });
+  }
+});
+
+// Récupérer une categorie par ID (READ)
+app.get("/categories/:id", async (req, res) => {
+  try {
+    const categorie = await Categorie.findById(req.params.id);
+    if (!categorie) {
+      return res.status(404).json({ message: "Categorie non trouvée" });
+    }
+    res.json(categorie);
+  } catch (error) {
+    console.error(error);
+    res
+      .status(500)
+      .json({ message: "Erreur lors de la récupération de la categorie" });
+  }
+});
+
+app.put("/categories/:id", async (req, res) => {
+  try {
+    const { CategorieName, LogoCategorie } = req.body;
+
+    const existingCategorie = await Categorie.findById(req.params.id);
+    if (!existingCategorie) {
+      return res.status(404).json({ message: "Categorie non trouvée" });
+    }
+
+    if (CategorieName !== existingCategorie.CategorieName) {
+      const nameExists = await Categorie.findOne({ CategorieName });
+      if (nameExists) {
+        return res
+          .status(400)
+          .json({ message: "Ce nom de categorie est déjà utilisé" });
+      }
+    }
+
+    const updatedCategorie = await Categorie.findByIdAndUpdate(
       req.params.id,
-      { status },
+      { CategorieName, LogoCategorie },
       { new: true }
     );
 
-    if (!commande) {
-      return res.status(404).json({ error: "Commande not found" });
-    }
+    res.json(updatedCategorie);
+  } catch (error) {
+    console.error(error);
+    res
+      .status(500)
+      .json({ message: "Erreur lors de la mise à jour de la categorie" });
+  }
+});
 
-    res.json(commande);
+// Supprimer une  (DELETE)
+app.delete("/categories/:id", async (req, res) => {
+  try {
+    const deletedCategorie = await Categorie.findByIdAndDelete(req.params.id);
+    if (!deletedCategorie) {
+      return res.status(404).json({ message: "Categorie non trouvée" });
+    }
+    res.json({ message: "Categorie supprimée avec succès" });
+  } catch (error) {
+    console.error(error);
+    res
+      .status(500)
+      .json({ message: "Erreur lors de la suppression de la categorie" });
+  }
+});
+
+app.get("/diposercvs", async (req, res) => {
+  try {
+    const cvs = await Diposercv.find().sort({ createdAt: -1 });
+    res.json(cvs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/diposercvs", async (req, res) => {
+  try {
+    const newCv = new Diposercv(req.body);
+    await newCv.save();
+    res.status(201).json(newCv);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch("/diposercvs/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, responsable } = req.body;
+
+    if (!["En cours de traitement", "Reserver"].includes(status)) {
+      return res.status(400).json({ error: "Statut invalide" });
+    }
+
+    const updated = await Diposercv.findByIdAndUpdate(
+      id,
+      { status, responsable },
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ error: "CV non trouvé" });
+    }
+
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Supprimer un CV
+app.delete("/diposercvs/:id", async (req, res) => {
+  try {
+    const deleted = await Diposercv.findByIdAndDelete(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: "CV non trouvé" });
+    }
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+//category
+// Nouvelle route pour les produits groupés par catégorie
+app.get("/products-by-categories", async (req, res) => {
+  try {
+    // Récupérer toutes les catégories
+    const categories = await Categorie.find();
+
+    // Récupérer tous les produits
+    const products = await Products.find();
+
+    // Structurer les données
+    const result = categories.map((category) => {
+      return {
+        _id: category._id,
+        name: category.CategorieName,
+        logo: category.LogoCategorie,
+        products: products.filter(
+          (product) => product.en.category === category.CategorieName
+        ),
+      };
+    });
+
+    res.status(200).json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
